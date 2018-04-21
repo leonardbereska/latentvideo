@@ -1,20 +1,20 @@
-# Triplet testing U-Net
+# Triplet colorjitter
 print_output = False
 use_triplet = True
 use_cuda = True
 file_name = 'tripletpro'
-gpu = 1
+gpu = 0
 img_size = 64
 nf = 32  # number of features
-nz = 10  # dimension of latent space
+nz = 200  # dimension of latent space
 n_layer = 4  # number of generator/encoder layers
 batch_size = 64
 nc = 1  # number of channels
-log_interval = 2
+log_interval = 1
 num_epochs = 100
 lr = 0.0005  # 10^-3 is fast, 10^-4 is save
 which_dataset = 'kth'
 num_workers = 16
 # experiment_name = 'img{}_nf{}_layers{}'.format(img_size, nf, n_layer)
 # experiment_name = 'img{}_nf{}_nz{}'.format(img_size, nf, nz)
-experiment_name = 'kthtest'
+experiment_name = 'test1'

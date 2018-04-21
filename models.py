@@ -150,13 +150,13 @@ class Encoder(BaseModule):  # like Discriminator but last layer to latent dimens
         super(Encoder, self).__init__()
         self.net = Reducer(n_layer)
         self.mu = nn.Conv2d(nf * 2**(n_layer-1), nz, img_size / 2**n_layer, 1, 0)  # effectively linear layer
-        self.logvar = nn.Conv2d(nf * 2**(n_layer-1), nz, img_size / 2**n_layer, 1, 0)  # linear layer
+        # self.logvar = nn.Conv2d(nf * 2**(n_layer-1), nz, img_size / 2**n_layer, 1, 0)  # linear layer
 
     def forward(self, x):
         x = self.net(x)
-        mu = F.tanh(self.mu(x))
-        logvar = F.tanh(self.logvar(x))
-        return mu, logvar
+        mu = F.tanh(self.mu(x))  # todo careful here: tanh restricts latent space to hypersphere!
+        # logvar = F.tanh(self.logvar(x))
+        return mu #, logvar
 
 
 ##############################################################################################################
@@ -257,105 +257,48 @@ class TripletUNet(nn.Module):
 class TripletPro(nn.Module):
     def __init__(self, n_layer=4):
         super(TripletPro, self).__init__()
-        self.background = Reducer(n_layer, nf/2)
+        self.appearance = Reducer(n_layer, nf / 2)
         self.pose = Encoder(n_layer)
-        # nf_red = nf * 2 ** (n_layer - 1)
-        tnf = nf * 2 ** (n_layer - 1)  # 128 for nf = 16
 
-        self.mu = nn.Conv2d(tnf, nz, img_size / 2 ** n_layer, 1, 0)  # effectively linear layer
-        self.logvar = nn.Conv2d(tnf, nz, img_size / 2 ** n_layer, 1, 0)  # linear layer
-        self.pose_estimator = nn.ConvTranspose2d(nz, tnf / 2, img_size / 2 ** n_layer, 1, 0)  # use nf/2
-        self.generator = nn.Sequential(DeConvLReluBN(3 * tnf / 2, tnf / 2, 4, 2, 1),
-                                       DeConvLReluBN(tnf / 2, tnf / 4, 4, 2, 1),
-                                       DeConvLReluBN(tnf / 4, tnf / 8, 4, 2, 1),
-                                       nn.ConvTranspose2d(tnf/8, nc, 4, 2, 1, bias=True),
-                                       nn.Tanh())
+        nf_red = nf * 2 ** (n_layer - 1)
+        self.pose_estimator = nn.ConvTranspose2d(nz, nf_red / 2, img_size / 2 ** n_layer, 1, 0)  # use nf/2
 
-    def forward(self, a, b, random_frame, sample=True):
-        z_a, _ = self.pose(a)  # don't mind about log_var
-        z_b, _ = self.pose(b)  # weight sharing
-        bg = self.background(random_frame)
+        self.generator = Deconver(n_layer)
 
-        # latent information aggregation
-        # mu = (z_b - z_a) / 2  # reconstruction should not work for same image
-        # pose = self.pose_estimator(mu)
+    def generate(self, pose, appear):
+        pose = self.pose_estimator(pose)
+        x = torch.cat((appear, pose), 1)
+        x = self.generator(x)
+        return x
 
-        # logvar = (logvar_a + logvar_b) / 2  # todo use logvar think about which var to use
-        # if sample:
-        #     mu = reparametrize(mu, logvar)
-        pose_a = self.pose_estimator(z_a)
-        pose_b = self.pose_estimator(z_b)
+    def forward(self, frame0, frame2, frame_rand, sample=False):
+        p_0 = self.pose(frame0)  # don't mind about log_var
+        p_2 = self.pose(frame2)  # weight sharing
+        p_1 = (p_0 + p_2) / 2  # pose space should be locally linear (as any manifold by definition)
 
-        x_mini = torch.cat((bg, pose_a, pose_b), 1)
+        a_rand = self.appearance(frame_rand)
 
-        x = self.generator(x_mini)
+        # if sample:  # reparametrize  # todo resolve NaN loss error
+        #     std = torch.sqrt(torch.pow(p_0 - p_2, 2))  # element-wise norm as standard deviation
+        #     eps = Variable(std.data.new(std.size()).normal_()).cuda()
+        #     p_1 = eps.mul(std).add_(p_1)
+
+        x = self.generate(p_1, a_rand)
         return x
 
     def reconstruct(self, x):
         return self.forward(x, x, x)
 
 
-class Triplet(nn.Module):
-    def __init__(self, n_layer=4):
-        super(Triplet, self).__init__()
-        self.encoder = Encoder(n_layer).cuda()
-        self.generator = Generator(n_layer).cuda()
-        # self.linear = nn.Linear(2 * nz, nz)
-        self.interpolator = nn.Sequential(nn.Linear(2 * nz, nz), nn.LeakyReLU(0.2))
+# how to build a z processing:
+# self.pose_estimator = nn.ConvTranspose2d(nz, tnf / 2, img_size / 2 ** n_layer, 1, 0)  # use nf/2
+# pose_a = self.pose_estimator(p_a)
+# pose_b = self.pose_estimator(p_b)
 
-    def forward(self, a, b, sample=True):
-        z_a, logvar_a = self.encoder(a)  # don't mind about log_var
-        z_b, logvar_b = self.encoder(b)  # weight sharing
-        z_a = z_a.view(-1, nz)
-        z_b = z_b.view(-1, nz)
-
-        z = torch.cat([z_a, z_b], 1)
-        # mu = F.dropout(F.relu(self.linear(z)))  # todo use dropout?
-        # z = z.cpu()  # todo cpu for resolving cuda error
-        # mu = self.interpolator(z)
-        # mu = (z_a + z_b) / 2  # naively interpolate
-        logvar = torch.log(torch.exp(logvar_a) + torch.exp(logvar_b))  # naive variance
-        # todo make sure variance is bounded and mean makes sense!
-        # logvar = torch.cuda()  # todo logvar 
-        if sample:
-            mu = reparametrize(mu, logvar)        # do I need to re-parametrize?  -> yes
-        x = self.generator(mu)
-        return x, mu, logvar
-
-    def reconstruct(self, x, sample=True):
-        mu, logvar = self.encoder(x)
-        if sample:
-            mu = reparametrize(mu, logvar)
-        x = self.generator(mu)
-        return x, mu, logvar
-
-
-# class FeatureExtractor(nn.Module):
-#     def __init__(self, submodule, extracted_layers):
-#         super(FeatureExtractor, self).__init__()
-#         self.submodule = submodule
-#         self.extracted_layers = extracted_layers
+# x_mini = torch.cat((a_rand, pose_a, pose_b), 1)
 #
-#     def forward(self, x):
-#         outputs = []
-#         for name, module in self.submodule._modules.items():
-#             x = module(x)
-#             print(name)
-#             if name in self.extracted_layers:
-#                 outputs.append(x)
-#         return outputs
-
-# TODO new Triplet architecture
-# like UNIT / Cycle-GAN, pix2pix:
-# - reduce image to small size
-# - residual blocks for processing
-#
-# try different reductions (n_layers)
-# add GAN loss
-# GAN in Discriminator features
-
-# todo how to enforce the bottleneck of obtain a good latent structure?
-# - somehow need to separate background
-# - image to image translation (somehow) e.g. one appearance to another
-# e.g. CycleGAN from sports to sports-fashion dataset  -> read DiscoGAN
-
+# tnf = nf * 2 ** (n_layer - 1)  # 128 for nf = 16
+# self.generator = nn.Sequential(DeConvLReluBN(2 * tnf / 2, tnf / 2, 4, 2, 1),
+#                                DeConvLReluBN(tnf / 2, tnf / 4, 4, 2, 1),
+#                                DeConvLReluBN(tnf / 4, tnf / 8, 4, 2, 1),
+#                                nn.ConvTranspose2d(tnf / 8, nc, 4, 2, 1, bias=True), nn.Tanh())

@@ -4,6 +4,8 @@ from skimage import io
 from torchvision import transforms, datasets, utils
 import config
 import random
+import numpy as np
+import re
 
 which_dataset = config.which_dataset  # 'mnist' for mnist
 batch_size = config.batch_size
@@ -11,6 +13,17 @@ img_size = config.img_size  # width and height of image in pixels
 nc = config.nc  # number of color channels
 n_workers = config.num_workers
 use_triplet = config.use_triplet
+
+
+def tryint(s):
+    try:
+        return int(s)
+    except ValueError:
+        return s
+
+
+def alphanum_key(s):  # get right ordering for images with paths like '1.png', '10.png'
+    return [tryint(c) for c in re.split('([0-9]+)', s)]
 
 
 class VideoSequenceData(torch.utils.data.Dataset):
@@ -24,6 +37,9 @@ class VideoSequenceData(torch.utils.data.Dataset):
     def __init__(self, root_dir, transform=None, subset=False, which_frames=(0, 1, 2)):
         self.root_dir = root_dir
         self.transform = transform
+        self.transform_appear = transforms.Compose([transforms.ToPILImage(),
+                                                   transforms.ColorJitter(brightness=0.7, contrast=0.7, saturation=0.7),
+                                                   transforms.ToTensor()])
         self.subset = subset  # bool: is this dataset for triplets or images?
         self.sequence_paths = []
         self.image_paths = []
@@ -33,9 +49,10 @@ class VideoSequenceData(torch.utils.data.Dataset):
             self.sequence_paths.extend(os.path.join(path, name) for name in folders)
         for i, sequence in enumerate(self.sequence_paths):
             for (path, _, files) in os.walk(sequence):
-                    videos = [os.path.join(path, name) for name in files]
-                    self.image_paths.extend(videos)
-                    self.sequences.append(videos)
+                files = sorted(files, key=alphanum_key)
+                videos = [os.path.join(path, name) for name in files]
+                self.image_paths.extend(videos)
+                self.sequences.append(videos)
             self.sequence_lengths.append(len(files))
 
         subset_length = max(which_frames)
@@ -84,6 +101,10 @@ class VideoSequenceData(torch.utils.data.Dataset):
         for i in image_idx:
             frames.append(self.get_image(idx=None, img_path=i))
 
+        # apply transform leaving pose invariant: contrast, color etc.
+        frames[0] = self.transform_appear(frames[0])
+        frames[2] = self.transform_appear(frames[2])
+
         return frames
 
 
@@ -102,7 +123,7 @@ t_list = [transforms.ToPILImage()]
 if nc == 1:  # use Grayscale
     t_list.append(transforms.Grayscale(1))
 else:
-    pass  # todo color augmentation
+    pass  # todo color augment
 t_list.append(transforms.Resize([img_size, img_size]))
 if not use_triplet:  # no flipping in triplets
     t_list.append(transforms.RandomHorizontalFlip())
@@ -112,7 +133,7 @@ transform = transforms.Compose(t_list)
 # Choose dataset
 dset_path = '../../dsets/'
 if which_dataset == 'kth':
-    test_dir = '{}KTH/running'.format(dset_path)
+    test_dir = '{}KTH/walking'.format(dset_path)
     train_dir = '{}KTH/running'.format(dset_path)
 
 elif which_dataset == 'olympic':
@@ -122,8 +143,8 @@ elif which_dataset == 'olympic':
 
 # Define datasets
 if use_triplet:
-    trainset = VideoSequenceData(train_dir, transform, subset=True, which_frames=(0, 2, 4))
-    testset = VideoSequenceData(test_dir, transform, subset=True, which_frames=(0, 2, 4))
+    trainset = VideoSequenceData(train_dir, transform, subset=True, which_frames=(0, 1, 2))
+    testset = VideoSequenceData(test_dir, transform, subset=True, which_frames=(0, 1, 2))
 else:
     trainset = VideoSequenceData(train_dir, transform, subset=False)
     testset = VideoSequenceData(test_dir, transform, subset=False)
