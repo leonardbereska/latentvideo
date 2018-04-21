@@ -129,6 +129,18 @@ def run(n_epochs):
                 x_ba = x_ba.data.cpu()
                 show_images([a, b, x_ab, x_ba], 2, 'Switch Pose/Appearance', epoch)
 
+                # Test interpolation
+                length = 5
+                seq = video1[0:length]
+                seq = [evalset.get_image(None, img_path=path) for path in seq]
+                seq = [img.view([1] + [i for i in img.shape]) for img in seq]
+                appear = model.appearance(Variable(seq[0]).cuda())
+                p_init = model.pose(Variable(seq[0]).cuda())
+                p_end = model.pose(Variable(seq[-1]).cuda())
+                alpha = [float(i) / (length-1) for i in range(0, length)]
+                poses = [alpha[i] * p_init + (1-alpha[i]) * p_end for i in range(0, length)]
+                images = [model.generate(p, appear) for p in poses]
+                show_images(images, length, 'Linear Interpolation in Pose space', epoch)
 
 
 
