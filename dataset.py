@@ -10,6 +10,7 @@ batch_size = config.batch_size
 img_size = config.img_size  # width and height of image in pixels
 nc = config.nc  # number of color channels
 n_workers = config.num_workers
+use_triplet = config.use_triplet
 
 
 class VideoSequenceData(torch.utils.data.Dataset):
@@ -86,48 +87,48 @@ class VideoSequenceData(torch.utils.data.Dataset):
         return frames
 
 
+assert which_dataset in ['olympic', 'kth']
+# if which_dataset == 'mnist':
+#     assert(img_size == 28)
+#     assert(nc == 1)
+#     transform = transforms.Compose(
+#         [transforms.ToTensor(), transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))])
+#     trainset = datasets.MNIST(root='./data/', train=True, download=True, transform=transform)
+#     testset = datasets.MNIST(root='./data/', train=False, download=True, transform=transform)
+#
 
-assert which_dataset in ['mnist', 'triplet', 'olympic']
-if which_dataset == 'mnist':
-    assert(img_size == 28)
-    assert(nc == 1)
-    transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))])
-    trainset = datasets.MNIST(root='./data/', train=True, download=True, transform=transform)
-    testset = datasets.MNIST(root='./data/', train=False, download=True, transform=transform)
+# Create transform
+t_list = [transforms.ToPILImage()]
+if nc == 1:  # use Grayscale
+    t_list.append(transforms.Grayscale(1))
+else:
+    pass  # todo color augmentation
+t_list.append(transforms.Resize([img_size, img_size]))
+if not use_triplet:  # no flipping in triplets
+    t_list.append(transforms.RandomHorizontalFlip())
+t_list.append(transforms.ToTensor())
+transform = transforms.Compose(t_list)
 
-elif which_dataset == 'triplet':
-
-    transform = transforms.Compose([transforms.ToPILImage(),
-                                    transforms.Resize([img_size, img_size]),
-                                    # transforms.RandomHorizontalFlip(),  # not for triplet otherwise use as data augmentation
-                                    transforms.ToTensor()])
-
-    test_dir = 'datasets/OlympicSports/long_jump_test'
-    train_dir = 'datasets/OlympicSports/long_jump'
-    trainset = VideoSequenceData(train_dir, transform, subset=True, which_frames=(0, 2, 4))
-    testset = VideoSequenceData(test_dir, transform, subset=True, which_frames=(0, 2, 4))
+# Choose dataset
+dset_path = '../../dsets/'
+if which_dataset == 'kth':
+    test_dir = '{}KTH/running'.format(dset_path)
+    train_dir = '{}KTH/running'.format(dset_path)
 
 elif which_dataset == 'olympic':
-    # TODO Normalize the images between -1 and 1 to use Tanh
-    transform = transforms.Compose(
-        [transforms.ToPILImage(),
-         transforms.Resize([img_size, img_size]),
-         transforms.RandomHorizontalFlip(),
-         transforms.ToTensor()])
-    if nc == 1:
-        transform = transforms.Compose([transforms.ToPILImage(),
-                                        transforms.Grayscale(1),  # black-white
-                                        transforms.Resize([img_size, img_size]),
-                                        transforms.RandomHorizontalFlip(),
-                                        transforms.ToTensor()])
-    test_dir = 'datasets/OlympicSports/long_jump_test'
-    train_dir = 'datasets/OlympicSports/long_jump'
+    test_dir = '{}OlympicSports/long_jump_test'.format(dset_path)
+    train_dir = '{}OlympicSports/long_jump'.format(dset_path)
+
+
+# Define datasets
+if use_triplet:
+    trainset = VideoSequenceData(train_dir, transform, subset=True, which_frames=(0, 2, 4))
+    testset = VideoSequenceData(test_dir, transform, subset=True, which_frames=(0, 2, 4))
+else:
     trainset = VideoSequenceData(train_dir, transform, subset=False)
     testset = VideoSequenceData(test_dir, transform, subset=False)
 
-
-# data loaders
+# Choose data loaders
 train_loader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=n_workers)
 test_loader = torch.utils.data.DataLoader(testset, batch_size=batch_size, shuffle=True, num_workers=n_workers)
 

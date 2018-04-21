@@ -235,8 +235,8 @@ def init(gpu, file_name, experiment_name):
         print('CUDA not available')
 
     # init file names
-    folder = 'experiments'
-    save_dir = '{}/{}/{}'.format(folder, file_name, experiment_name)  # all relevant data for experiment stored here
+    folder = 'exp'
+    save_dir = '../../{}/{}/{}'.format(folder, file_name, experiment_name)  # all relevant data for experiment stored here
     writer = SummaryWriter('{}'.format(save_dir))  # tensorboard writer
 
     # write config data to tensorboard
@@ -246,7 +246,7 @@ def init(gpu, file_name, experiment_name):
             writer.add_text(line, line, 0)
 
     # save all files to experiment dir
-    mypath = '../Master'
+    mypath = '../../'
     src_files = os.listdir(mypath)
     for file_name in src_files:
         full_file_name = os.path.join(mypath, file_name)

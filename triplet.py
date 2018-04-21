@@ -39,6 +39,9 @@ def run(n_epochs):
 
             output = model(frame0, frame2, random_frame)
             loss = F.l1_loss(output, frame1)  # TODO make a proper VAE loss
+
+
+
             loss.backward()
             optimizer.step()
             train_loss = loss.data[0]
@@ -68,7 +71,7 @@ def run(n_epochs):
 
             # test reconstruction quality for images from train and test set
 
-            # TODo new
+            # TODo new eval.py
             phases = ['train', 'test']
             for phase in phases:
                 if phase == 'train':
